@@ -248,8 +248,8 @@
         );
       };
 
-      // Chart Component
-      const PriceChart = ({ symbol, data }) => {
+      // Enhanced Chart Component with Candlestick and Technical Indicators
+      const PriceChart = ({ symbol, data, chartType = "line", indicators = [] }) => {
         const chartRef = useRef(null);
         const chartInstance = useRef(null);
 
@@ -262,55 +262,199 @@
               chartInstance.current.destroy();
             }
 
-            // Generate mock historical data
+            // Generate enhanced historical data with OHLCV
             const generateHistoricalData = (currentPrice) => {
               const data = [];
               const labels = [];
               let price = currentPrice;
 
-              for (let i = 30; i >= 0; i--) {
+              for (let i = 60; i >= 0; i--) {
                 const date = new Date();
-                date.setDate(date.getDate() - i);
-                labels.push(date.toLocaleDateString());
+                date.setMinutes(date.getMinutes() - i * 5);
+                labels.push(date.toLocaleTimeString());
 
-                // Random walk
-                price += (Math.random() - 0.5) * 10;
-                data.push(Math.max(price, 1));
+                // Generate OHLCV data
+                const open = price;
+                const change = (Math.random() - 0.5) * 5;
+                const close = Math.max(open + change, 1);
+                const high = Math.max(open, close) + Math.random() * 2;
+                const low = Math.min(open, close) - Math.random() * 2;
+                const volume = Math.floor(Math.random() * 1000000) + 100000;
+
+                data.push({ 
+                  open: parseFloat(open.toFixed(2)), 
+                  high: parseFloat(high.toFixed(2)), 
+                  low: parseFloat(low.toFixed(2)), 
+                  close: parseFloat(close.toFixed(2)),
+                  volume,
+                  timestamp: date.toISOString()
+                });
+                price = close;
               }
 
               return { labels, data };
             };
 
-            const { labels, data: priceData } = generateHistoricalData(
-              data.price
-            );
+            const { labels, historicalData } = generateHistoricalData(data.price);
+            
+            // Calculate technical indicators
+            const calculateRSI = (prices, period = 14) => {
+              const rsi = [];
+              for (let i = period; i < prices.length; i++) {
+                let gains = 0, losses = 0;
+                for (let j = i - period; j < i; j++) {
+                  const change = prices[j + 1] - prices[j];
+                  if (change > 0) gains += change;
+                  else losses -= change;
+                }
+                const avgGain = gains / period;
+                const avgLoss = losses / period;
+                const rs = avgGain / avgLoss;
+                rsi.push(100 - (100 / (1 + rs)));
+              }
+              return rsi;
+            };
+
+            const calculateEMA = (prices, period) => {
+              const ema = [];
+              const multiplier = 2 / (period + 1);
+              ema[0] = prices[0];
+              for (let i = 1; i < prices.length; i++) {
+                ema[i] = (prices[i] * multiplier) + (ema[i - 1] * (1 - multiplier));
+              }
+              return ema;
+            };
+
+            const closePrices = historicalData.map(d => d.close);
+            const datasets = [];
+
+            if (chartType === "candlestick") {
+              // Create candlestick-like representation using bar chart
+              datasets.push({
+                label: `${symbol} Price`,
+                data: historicalData.map(d => d.close),
+                borderColor: historicalData.map(d => d.close > d.open ? 'green' : 'red'),
+                backgroundColor: historicalData.map(d => d.close > d.open ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 0, 0, 0.1)'),
+                borderWidth: 2,
+              });
+            } else {
+              datasets.push({
+                label: `${symbol} Price`,
+                data: closePrices,
+                borderColor: "rgb(59, 130, 246)",
+                backgroundColor: "rgba(59, 130, 246, 0.1)",
+                tension: 0.1,
+                fill: true,
+              });
+            }
+
+            // Add technical indicators
+            if (indicators.includes('rsi')) {
+              const rsiData = calculateRSI(closePrices);
+              datasets.push({
+                label: 'RSI',
+                data: [...Array(14).fill(null), ...rsiData],
+                borderColor: 'orange',
+                backgroundColor: 'rgba(255, 165, 0, 0.1)',
+                yAxisID: 'y1',
+                tension: 0.1,
+              });
+            }
+
+            if (indicators.includes('ema')) {
+              const ema12 = calculateEMA(closePrices, 12);
+              const ema26 = calculateEMA(closePrices, 26);
+              datasets.push({
+                label: 'EMA 12',
+                data: ema12,
+                borderColor: 'purple',
+                backgroundColor: 'rgba(128, 0, 128, 0.1)',
+                tension: 0.1,
+              });
+              datasets.push({
+                label: 'EMA 26',
+                data: ema26,
+                borderColor: 'brown',
+                backgroundColor: 'rgba(165, 42, 42, 0.1)',
+                tension: 0.1,
+              });
+            }
+
+            if (indicators.includes('volume')) {
+              datasets.push({
+                label: 'Volume',
+                data: historicalData.map(d => d.volume),
+                type: 'bar',
+                yAxisID: 'y2',
+                backgroundColor: 'rgba(156, 163, 175, 0.5)',
+              });
+            }
+
+            const scales = {
+              y: {
+                beginAtZero: false,
+                position: 'left',
+                title: {
+                  display: true,
+                  text: 'Price ($)',
+                },
+              },
+            };
+
+            if (indicators.includes('rsi')) {
+              scales.y1 = {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                min: 0,
+                max: 100,
+                title: {
+                  display: true,
+                  text: 'RSI',
+                },
+                grid: {
+                  drawOnChartArea: false,
+                },
+              };
+            }
+
+            if (indicators.includes('volume')) {
+              scales.y2 = {
+                type: 'linear',
+                display: true,
+                position: 'right',
+                title: {
+                  display: true,
+                  text: 'Volume',
+                },
+                grid: {
+                  drawOnChartArea: false,
+                },
+              };
+            }
 
             chartInstance.current = new Chart(ctx, {
-              type: "line",
+              type: chartType === "candlestick" ? "bar" : "line",
               data: {
                 labels,
-                datasets: [
-                  {
-                    label: `${symbol} Price`,
-                    data: priceData,
-                    borderColor: "rgb(59, 130, 246)",
-                    backgroundColor: "rgba(59, 130, 246, 0.1)",
-                    tension: 0.1,
-                    fill: true,
-                  },
-                ],
+                datasets,
               },
               options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: {
-                  y: {
-                    beginAtZero: false,
-                  },
+                interaction: {
+                  mode: 'index',
+                  intersect: false,
                 },
+                scales,
                 plugins: {
                   legend: {
-                    display: false,
+                    display: true,
+                    position: 'top',
+                  },
+                  title: {
+                    display: true,
+                    text: `${symbol} - ${chartType.toUpperCase()} Chart`,
                   },
                 },
               },
@@ -759,9 +903,663 @@
         );
       };
 
-      // Market Data Component
+      // Technical Analysis Component
+      const TechnicalAnalysis = ({ marketData }) => {
+        const [selectedStock, setSelectedStock] = useState("AAPL");
+        const [analysisType, setAnalysisType] = useState("overview");
+        const [selectedIndicators, setSelectedIndicators] = useState(['rsi', 'macd', 'bb', 'sma']);
+
+        const toggleIndicator = (indicator) => {
+          setSelectedIndicators(prev => 
+            prev.includes(indicator) 
+              ? prev.filter(i => i !== indicator)
+              : [...prev, indicator]
+          );
+        };
+
+        // Technical Analysis calculations
+        const calculateTechnicalData = (symbol) => {
+          if (!marketData[symbol]) return null;
+
+          const price = marketData[symbol].price;
+          const change = marketData[symbol].change || 0;
+          
+          // Mock technical analysis data
+          const rsi = 45 + Math.random() * 30; // RSI between 30-80
+          const macd = (Math.random() - 0.5) * 2;
+          const signal = macd + (Math.random() - 0.5) * 0.5;
+          const bollinger = {
+            upper: price * 1.02,
+            middle: price,
+            lower: price * 0.98
+          };
+          
+          const support = price * (0.95 + Math.random() * 0.03);
+          const resistance = price * (1.02 + Math.random() * 0.03);
+          
+          return {
+            rsi: rsi.toFixed(2),
+            macd: macd.toFixed(4),
+            signal: signal.toFixed(4),
+            bollinger,
+            support: support.toFixed(2),
+            resistance: resistance.toFixed(2),
+            trend: change > 0 ? 'Bullish' : 'Bearish',
+            volume_trend: Math.random() > 0.5 ? 'Increasing' : 'Decreasing',
+            volatility: (Math.random() * 30 + 10).toFixed(2) + '%'
+          };
+        };
+
+        const technical = calculateTechnicalData(selectedStock);
+
+        return (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <h2 className="text-2xl font-bold">Technical Analysis</h2>
+                
+                <div className="flex gap-4 items-center">
+                  <select
+                    value={selectedStock}
+                    onChange={(e) => setSelectedStock(e.target.value)}
+                    className="border border-gray-300 rounded-md px-3 py-2"
+                  >
+                    {Object.keys(marketData).map((stock) => (
+                      <option key={stock} value={stock}>
+                        {stock}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="flex gap-2">
+                    {['overview', 'indicators', 'patterns'].map(type => (
+                      <button
+                        key={type}
+                        onClick={() => setAnalysisType(type)}
+                        className={`px-3 py-2 rounded text-sm capitalize ${
+                          analysisType === type 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Technical Overview */}
+            {analysisType === "overview" && technical && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4">Key Metrics</h3>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <span>Current Trend:</span>
+                      <span className={`font-semibold ${technical.trend === 'Bullish' ? 'text-green-600' : 'text-red-600'}`}>
+                        {technical.trend}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>RSI (14):</span>
+                      <span className={`font-semibold ${
+                        technical.rsi > 70 ? 'text-red-600' : technical.rsi < 30 ? 'text-green-600' : 'text-yellow-600'
+                      }`}>
+                        {technical.rsi}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Support Level:</span>
+                      <span className="font-semibold">${technical.support}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Resistance Level:</span>
+                      <span className="font-semibold">${technical.resistance}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Volatility:</span>
+                      <span className="font-semibold">{technical.volatility}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4">Trading Signals</h3>
+                  <div className="space-y-3">
+                    <div className={`p-3 rounded ${technical.rsi > 70 ? 'bg-red-100 text-red-800' : technical.rsi < 30 ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                      <div className="font-semibold">RSI Signal</div>
+                      <div className="text-sm">
+                        {technical.rsi > 70 ? 'Overbought - Consider Selling' : technical.rsi < 30 ? 'Oversold - Consider Buying' : 'Neutral - Hold Position'}
+                      </div>
+                    </div>
+
+                    <div className={`p-3 rounded ${technical.macd > technical.signal ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <div className="font-semibold">MACD Signal</div>
+                      <div className="text-sm">
+                        {technical.macd > technical.signal ? 'Bullish Crossover' : 'Bearish Crossover'}
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded bg-blue-100 text-blue-800">
+                      <div className="font-semibold">Volume Trend</div>
+                      <div className="text-sm">{technical.volume_trend} volume activity</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Indicators Detail */}
+            {analysisType === "indicators" && (
+              <div className="space-y-6">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4">Select Indicators</h3>
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      { key: 'rsi', name: 'RSI', desc: 'Relative Strength Index' },
+                      { key: 'macd', name: 'MACD', desc: 'Moving Average Convergence Divergence' },
+                      { key: 'bb', name: 'Bollinger Bands', desc: 'Volatility Indicator' },
+                      { key: 'sma', name: 'SMA', desc: 'Simple Moving Average' },
+                      { key: 'ema', name: 'EMA', desc: 'Exponential Moving Average' },
+                      { key: 'stoch', name: 'Stochastic', desc: 'Momentum Oscillator' }
+                    ].map(indicator => (
+                      <button
+                        key={indicator.key}
+                        onClick={() => toggleIndicator(indicator.key)}
+                        className={`px-4 py-2 rounded-lg border-2 transition-colors ${
+                          selectedIndicators.includes(indicator.key)
+                            ? 'border-blue-500 bg-blue-50 text-blue-700'
+                            : 'border-gray-300 bg-white text-gray-700 hover:border-blue-300'
+                        }`}
+                      >
+                        <div className="font-semibold">{indicator.name}</div>
+                        <div className="text-xs">{indicator.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4">Advanced Chart with Indicators</h3>
+                  <div className="h-96">
+                    {marketData[selectedStock] && (
+                      <PriceChart
+                        symbol={selectedStock}
+                        data={marketData[selectedStock]}
+                        chartType="line"
+                        indicators={selectedIndicators}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pattern Analysis */}
+            {analysisType === "patterns" && (
+              <div className="bg-white rounded-lg shadow-md p-6">
+                <h3 className="text-lg font-semibold mb-4">Chart Pattern Recognition</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[
+                    { name: 'Head and Shoulders', probability: '65%', signal: 'Bearish', timeframe: '1D' },
+                    { name: 'Double Bottom', probability: '78%', signal: 'Bullish', timeframe: '4H' },
+                    { name: 'Ascending Triangle', probability: '43%', signal: 'Bullish', timeframe: '1H' },
+                    { name: 'Flag Pattern', probability: '56%', signal: 'Continuation', timeframe: '15M' },
+                    { name: 'Cup and Handle', probability: '71%', signal: 'Bullish', timeframe: '1D' },
+                    { name: 'Wedge Formation', probability: '39%', signal: 'Bearish', timeframe: '4H' }
+                  ].map((pattern, index) => (
+                    <div key={index} className="border rounded-lg p-4">
+                      <h4 className="font-semibold text-sm">{pattern.name}</h4>
+                      <div className="mt-2 space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span>Confidence:</span>
+                          <span className="font-semibold">{pattern.probability}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span>Signal:</span>
+                          <span className={`font-semibold ${
+                            pattern.signal === 'Bullish' ? 'text-green-600' : 
+                            pattern.signal === 'Bearish' ? 'text-red-600' : 'text-blue-600'
+                          }`}>
+                            {pattern.signal}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span>Timeframe:</span>
+                          <span className="font-semibold">{pattern.timeframe}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // Reports and Charts Component
+      const ReportsAndCharts = () => {
+        const [reportType, setReportType] = useState("performance");
+        const [timeframe, setTimeframe] = useState("1M");
+        const [portfolioData, setPortfolioData] = useState(null);
+
+        useEffect(() => {
+          // Generate mock portfolio performance data
+          const generatePortfolioData = () => {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+            const portfolioValue = [];
+            const benchmarkValue = [];
+            let pValue = 100000;
+            let bValue = 100000;
+
+            months.forEach(() => {
+              pValue += (Math.random() - 0.4) * 5000; // Slight upward bias
+              bValue += (Math.random() - 0.5) * 3000;
+              portfolioValue.push(pValue);
+              benchmarkValue.push(bValue);
+            });
+
+            return {
+              labels: months,
+              portfolioValue,
+              benchmarkValue,
+              totalReturn: ((pValue - 100000) / 100000 * 100).toFixed(2),
+              benchmarkReturn: ((bValue - 100000) / 100000 * 100).toFixed(2),
+              sharpeRatio: (1.2 + Math.random() * 0.8).toFixed(2),
+              maxDrawdown: (Math.random() * 15 + 5).toFixed(2),
+              winRate: (55 + Math.random() * 20).toFixed(1),
+              avgWin: (2.3 + Math.random() * 1.5).toFixed(2),
+              avgLoss: (-1.8 + Math.random() * 0.8).toFixed(2)
+            };
+          };
+
+          setPortfolioData(generatePortfolioData());
+        }, [timeframe]);
+
+        const PerformanceChart = ({ data }) => {
+          const chartRef = useRef(null);
+          const chartInstance = useRef(null);
+
+          useEffect(() => {
+            if (chartRef.current && data) {
+              const ctx = chartRef.current.getContext("2d");
+
+              if (chartInstance.current) {
+                chartInstance.current.destroy();
+              }
+
+              chartInstance.current = new Chart(ctx, {
+                type: "line",
+                data: {
+                  labels: data.labels,
+                  datasets: [
+                    {
+                      label: "Portfolio Value",
+                      data: data.portfolioValue,
+                      borderColor: "rgb(59, 130, 246)",
+                      backgroundColor: "rgba(59, 130, 246, 0.1)",
+                      tension: 0.1,
+                      fill: true,
+                    },
+                    {
+                      label: "Benchmark (S&P 500)",
+                      data: data.benchmarkValue,
+                      borderColor: "rgb(156, 163, 175)",
+                      backgroundColor: "rgba(156, 163, 175, 0.1)",
+                      tension: 0.1,
+                      fill: false,
+                    },
+                  ],
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    title: {
+                      display: true,
+                      text: "Portfolio Performance vs Benchmark",
+                    },
+                    legend: {
+                      display: true,
+                      position: 'top',
+                    },
+                  },
+                  scales: {
+                    y: {
+                      beginAtZero: false,
+                      title: {
+                        display: true,
+                        text: 'Portfolio Value ($)',
+                      },
+                    },
+                  },
+                },
+              });
+            }
+
+            return () => {
+              if (chartInstance.current) {
+                chartInstance.current.destroy();
+              }
+            };
+          }, [data]);
+
+          return <canvas ref={chartRef} />;
+        };
+
+        const AssetAllocationChart = () => {
+          const chartRef = useRef(null);
+          const chartInstance = useRef(null);
+
+          useEffect(() => {
+            if (chartRef.current) {
+              const ctx = chartRef.current.getContext("2d");
+
+              if (chartInstance.current) {
+                chartInstance.current.destroy();
+              }
+
+              const allocationData = [
+                { label: 'Stocks', value: 65, color: 'rgb(59, 130, 246)' },
+                { label: 'Bonds', value: 20, color: 'rgb(16, 185, 129)' },
+                { label: 'Cash', value: 10, color: 'rgb(245, 158, 11)' },
+                { label: 'Others', value: 5, color: 'rgb(239, 68, 68)' }
+              ];
+
+              chartInstance.current = new Chart(ctx, {
+                type: "doughnut",
+                data: {
+                  labels: allocationData.map(d => d.label),
+                  datasets: [{
+                    data: allocationData.map(d => d.value),
+                    backgroundColor: allocationData.map(d => d.color),
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                  }],
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: {
+                    title: {
+                      display: true,
+                      text: "Asset Allocation",
+                    },
+                    legend: {
+                      position: 'bottom',
+                    },
+                  },
+                },
+              });
+            }
+
+            return () => {
+              if (chartInstance.current) {
+                chartInstance.current.destroy();
+              }
+            };
+          }, []);
+
+          return <canvas ref={chartRef} />;
+        };
+
+        return (
+          <div className="space-y-6">
+            {/* Header */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <h2 className="text-2xl font-bold">Reports & Analytics</h2>
+                
+                <div className="flex gap-4 items-center">
+                  <select
+                    value={timeframe}
+                    onChange={(e) => setTimeframe(e.target.value)}
+                    className="border border-gray-300 rounded-md px-3 py-2"
+                  >
+                    <option value="1W">1 Week</option>
+                    <option value="1M">1 Month</option>
+                    <option value="3M">3 Months</option>
+                    <option value="6M">6 Months</option>
+                    <option value="1Y">1 Year</option>
+                  </select>
+
+                  <div className="flex gap-2">
+                    {['performance', 'allocation', 'risk', 'trades'].map(type => (
+                      <button
+                        key={type}
+                        onClick={() => setReportType(type)}
+                        className={`px-3 py-2 rounded text-sm capitalize ${
+                          reportType === type 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Performance Report */}
+            {reportType === "performance" && portfolioData && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-lg shadow-md p-4">
+                    <h3 className="text-sm font-medium text-gray-500">Total Return</h3>
+                    <p className={`text-2xl font-bold ${portfolioData.totalReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {portfolioData.totalReturn >= 0 ? '+' : ''}{portfolioData.totalReturn}%
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-lg shadow-md p-4">
+                    <h3 className="text-sm font-medium text-gray-500">vs Benchmark</h3>
+                    <p className={`text-2xl font-bold ${(portfolioData.totalReturn - portfolioData.benchmarkReturn) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(portfolioData.totalReturn - portfolioData.benchmarkReturn) >= 0 ? '+' : ''}{(portfolioData.totalReturn - portfolioData.benchmarkReturn).toFixed(2)}%
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-lg shadow-md p-4">
+                    <h3 className="text-sm font-medium text-gray-500">Sharpe Ratio</h3>
+                    <p className="text-2xl font-bold text-blue-600">{portfolioData.sharpeRatio}</p>
+                  </div>
+                  <div className="bg-white rounded-lg shadow-md p-4">
+                    <h3 className="text-sm font-medium text-gray-500">Max Drawdown</h3>
+                    <p className="text-2xl font-bold text-red-600">-{portfolioData.maxDrawdown}%</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <div className="h-80">
+                    <PerformanceChart data={portfolioData} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Asset Allocation */}
+            {reportType === "allocation" && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <div className="h-80">
+                    <AssetAllocationChart />
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h3 className="text-lg font-semibold mb-4">Portfolio Breakdown</h3>
+                  <div className="space-y-4">
+                    {[
+                      { category: 'Stocks', amount: '$65,000', percentage: '65%', change: '+5.2%' },
+                      { category: 'Bonds', amount: '$20,000', percentage: '20%', change: '+1.8%' },
+                      { category: 'Cash', amount: '$10,000', percentage: '10%', change: '0.0%' },
+                      { category: 'Others', amount: '$5,000', percentage: '5%', change: '+12.3%' }
+                    ].map((item, index) => (
+                      <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded">
+                        <div>
+                          <div className="font-medium">{item.category}</div>
+                          <div className="text-sm text-gray-500">{item.percentage}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold">{item.amount}</div>
+                          <div className={`text-sm ${item.change.startsWith('+') ? 'text-green-600' : item.change.startsWith('-') ? 'text-red-600' : 'text-gray-600'}`}>
+                            {item.change}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Risk Analysis */}
+            {reportType === "risk" && portfolioData && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Risk Metrics</h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span>Portfolio Beta:</span>
+                        <span className="font-semibold">1.15</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Volatility (Annual):</span>
+                        <span className="font-semibold">18.5%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Value at Risk (95%):</span>
+                        <span className="font-semibold text-red-600">-$4,200</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Correlation to Market:</span>
+                        <span className="font-semibold">0.78</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Sector Exposure</h3>
+                    <div className="space-y-2">
+                      {[
+                        { sector: 'Technology', exposure: '35%' },
+                        { sector: 'Healthcare', exposure: '20%' },
+                        { sector: 'Financial', exposure: '15%' },
+                        { sector: 'Consumer', exposure: '12%' },
+                        { sector: 'Energy', exposure: '8%' },
+                        { sector: 'Others', exposure: '10%' }
+                      ].map((item, index) => (
+                        <div key={index} className="flex justify-between">
+                          <span className="text-sm">{item.sector}:</span>
+                          <span className="text-sm font-semibold">{item.exposure}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Geographic Allocation</h3>
+                    <div className="space-y-2">
+                      {[
+                        { region: 'North America', allocation: '60%' },
+                        { region: 'Europe', allocation: '25%' },
+                        { region: 'Asia Pacific', allocation: '10%' },
+                        { region: 'Emerging Markets', allocation: '5%' }
+                      ].map((item, index) => (
+                        <div key={index} className="flex justify-between">
+                          <span className="text-sm">{item.region}:</span>
+                          <span className="text-sm font-semibold">{item.allocation}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Trading Analysis */}
+            {reportType === "trades" && portfolioData && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Trading Statistics</h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span>Win Rate:</span>
+                        <span className="font-semibold text-green-600">{portfolioData.winRate}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Average Win:</span>
+                        <span className="font-semibold text-green-600">+{portfolioData.avgWin}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Average Loss:</span>
+                        <span className="font-semibold text-red-600">{portfolioData.avgLoss}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Profit Factor:</span>
+                        <span className="font-semibold">1.43</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Recent Performance</h3>
+                    <div className="space-y-2">
+                      {[
+                        { period: 'Today', return: '+0.8%', color: 'text-green-600' },
+                        { period: 'This Week', return: '+2.1%', color: 'text-green-600' },
+                        { period: 'This Month', return: '-1.2%', color: 'text-red-600' },
+                        { period: 'This Quarter', return: '+5.7%', color: 'text-green-600' }
+                      ].map((item, index) => (
+                        <div key={index} className="flex justify-between">
+                          <span className="text-sm">{item.period}:</span>
+                          <span className={`text-sm font-semibold ${item.color}`}>{item.return}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Top Holdings</h3>
+                    <div className="space-y-2">
+                      {[
+                        { symbol: 'AAPL', allocation: '8.5%' },
+                        { symbol: 'MSFT', allocation: '7.2%' },
+                        { symbol: 'GOOGL', allocation: '6.8%' },
+                        { symbol: 'AMZN', allocation: '5.9%' },
+                        { symbol: 'TSLA', allocation: '4.3%' }
+                      ].map((item, index) => (
+                        <div key={index} className="flex justify-between">
+                          <span className="text-sm font-medium">{item.symbol}:</span>
+                          <span className="text-sm font-semibold">{item.allocation}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // Enhanced Market Data Component
       const MarketData = ({ marketData }) => {
         const [selectedStock, setSelectedStock] = useState("AAPL");
+        const [chartType, setChartType] = useState("line");
+        const [indicators, setIndicators] = useState([]);
+
+        const toggleIndicator = (indicator) => {
+          setIndicators(prev => 
+            prev.includes(indicator) 
+              ? prev.filter(i => i !== indicator)
+              : [...prev, indicator]
+          );
+        };
 
         return (
           <div className="space-y-6">
@@ -783,22 +1581,70 @@
                     <div className="text-lg font-bold">
                       ${data.price.toFixed(2)}
                     </div>
+                    <div className={`text-sm ${data.change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {data.change >= 0 ? '+' : ''}{data.change?.toFixed(2)} ({((data.change / data.price) * 100).toFixed(2)}%)
+                    </div>
                     <div className="text-xs text-gray-500">{data.name}</div>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* Chart Controls */}
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex flex-wrap justify-between items-center gap-4">
+                <h3 className="text-lg font-semibold">Chart Analysis</h3>
+                
+                <div className="flex flex-wrap gap-4 items-center">
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setChartType("line")}
+                      className={`px-3 py-1 rounded text-sm ${
+                        chartType === "line" ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      Line
+                    </button>
+                    <button
+                      onClick={() => setChartType("candlestick")}
+                      className={`px-3 py-1 rounded text-sm ${
+                        chartType === "candlestick" ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      Candlestick
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2">
+                    {['rsi', 'ema', 'volume'].map(indicator => (
+                      <button
+                        key={indicator}
+                        onClick={() => toggleIndicator(indicator)}
+                        className={`px-3 py-1 rounded text-sm ${
+                          indicators.includes(indicator)
+                            ? 'bg-green-500 text-white'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                        }`}
+                      >
+                        {indicator.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Stock Chart */}
             {selectedStock && marketData[selectedStock] && (
               <div className="bg-white rounded-lg shadow-md p-6">
-                <h3 className="text-lg font-semibold mb-4">
-                  {selectedStock} - {marketData[selectedStock].name}
-                </h3>
-                <PriceChart
-                  symbol={selectedStock}
-                  data={marketData[selectedStock]}
-                />
+                <div className="h-96">
+                  <PriceChart
+                    symbol={selectedStock}
+                    data={marketData[selectedStock]}
+                    chartType={chartType}
+                    indicators={indicators}
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -822,6 +1668,8 @@
           { id: "portfolio", name: "Portfolio", icon: "fas fa-briefcase" },
           { id: "transactions", name: "Transactions", icon: "fas fa-list" },
           { id: "market", name: "Market", icon: "fas fa-chart-bar" },
+          { id: "technical", name: "Technical Analysis", icon: "fas fa-chart-area" },
+          { id: "reports", name: "Reports & Charts", icon: "fas fa-analytics" },
           { id: "news", name: "News", icon: "fas fa-newspaper" },
         ];
 
@@ -891,6 +1739,8 @@
                 <Transactions key={refreshKey} />
               )}
               {activeTab === "market" && <MarketData marketData={marketData} />}
+              {activeTab === "technical" && <TechnicalAnalysis marketData={marketData} />}
+              {activeTab === "reports" && <ReportsAndCharts />}
               {activeTab === "news" && <News />}
             </div>
           </div>
